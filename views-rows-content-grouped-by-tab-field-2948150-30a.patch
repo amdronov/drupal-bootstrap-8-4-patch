@@ -1,0 +1,223 @@
+diff --git a/src/Plugin/views/style/ViewsBootstrapTab.php b/src/Plugin/views/style/ViewsBootstrapTab.php
+index 1fd2710..5e9905f 100644
+--- a/src/Plugin/views/style/ViewsBootstrapTab.php
++++ b/src/Plugin/views/style/ViewsBootstrapTab.php
+@@ -38,12 +38,20 @@ class ViewsBootstrapTab extends StylePluginBase {
+    */
+   protected $usesRowPlugin = TRUE;
+ 
++  /**
++   * Does the style plugin support grouping of rows.
++   *
++   * @var bool
++   */
++  protected $usesGrouping = FALSE;
++
+   /**
+    * Definition.
+    */
+   protected function defineOptions() {
+     $options = parent::defineOptions();
+     $options['tab_field'] = ['default' => NULL];
++    $options['tab_group'] = ['default' => FALSE];
+     $options['tab_type'] = ['default' => 'tabs'];
+     $options['justified'] = ['default' => FALSE];
+     return $options;
+@@ -56,36 +64,42 @@ class ViewsBootstrapTab extends StylePluginBase {
+     parent::buildOptionsForm($form, $form_state);
+     if (isset($form['grouping'])) {
+       unset($form['grouping']);
++    }
+ 
+-      $form['tab_field'] = [
+-        '#type' => 'select',
+-        '#title' => $this->t('Tab field'),
+-        '#options' => $this->displayHandler->getFieldLabels(TRUE),
+-        '#required' => TRUE,
+-        '#default_value' => $this->options['tab_field'],
+-        '#description' => $this->t('Select the field that will be used as the tab.'),
+-      ];
++    $form['tab_field'] = [
++      '#type' => 'select',
++      '#title' => $this->t('Tab field'),
++      '#options' => $this->displayHandler->getFieldLabels(TRUE),
++      '#required' => TRUE,
++      '#default_value' => $this->options['tab_field'],
++      '#description' => $this->t('Select the field that will be used as the tab.'),
++    ];
+ 
+-      $form['tab_type'] = [
+-        '#type' => 'select',
+-        '#title' => $this->t('Tab Type'),
+-        '#options' => [
+-          'tabs' => $this->t('Tabs'),
+-          'pills' => $this->t('Pills'),
+-          'list' => $this->t('List'),
+-        ],
+-        '#required' => TRUE,
+-        '#default_value' => $this->options['tab_type'],
+-      ];
++    $form['tab_group'] = [
++      '#type' => 'checkbox',
++      '#title' => $this->t('Group by tab field'),
++      '#default_value' => $this->options['tab_group'],
++      '#description' => $this->t('If you want to group tabs by same values.'),
++    ];
+ 
+-      $form['justified'] = [
+-        '#type' => 'checkbox',
+-        '#title' => $this->t('Justified'),
+-        '#default_value' => $this->options['justified'],
+-        '#description' => $this->t('Make tabs equal widths of their parent'),
+-      ];
+-    }
++    $form['tab_type'] = [
++      '#type' => 'select',
++      '#title' => $this->t('Tab Type'),
++      '#options' => [
++        'tabs' => $this->t('Tabs'),
++        'pills' => $this->t('Pills'),
++        'list' => $this->t('List'),
++      ],
++      '#required' => TRUE,
++      '#default_value' => $this->options['tab_type'],
++    ];
+ 
++    $form['justified'] = [
++      '#type' => 'checkbox',
++      '#title' => $this->t('Justified'),
++      '#default_value' => $this->options['justified'],
++      '#description' => $this->t('Make tabs equal widths of their parent'),
++    ];
+   }
+ 
+ }
+diff --git a/templates/views-bootstrap-tab.html.twig b/templates/views-bootstrap-tab.html.twig
+index 5955b42..ec61a9c 100644
+--- a/templates/views-bootstrap-tab.html.twig
++++ b/templates/views-bootstrap-tab.html.twig
+@@ -2,20 +2,39 @@
+     <h3>{{ title }}</h3>
+ {% endif %}
+ <div id="views-bootstrap-tab-{{ id }}" {{ attributes.addClass(classes) }}>
+-    <ul class="nav nav-{{ tab_type }} {% if justified %}nav-justified{% endif %}">
+-        {% for key, tab in tabs %}
+-            {% set tab_classes = [loop.first ? 'active'] %}
+-            <li class="{{ tab_classes|join(' ') }}">
+-                <a href="{{ "#tab-#{  id }-#{ key }" }}" data-toggle="tab">{{ tab }}</a>
+-            </li>
+-        {% endfor %}
+-    </ul>
+-    <div class="tab-content">
+-        {% for key, row in rows %}
+-            {% set row_classes = ['tab-pane', loop.first ? 'active'] %}
+-            <div class="{{ row_classes|join(' ') }}" id="tab-{{ id }}-{{ key }}" {{ row.attributes }}>
+-            {{ row.content }}
+-        </div>
+-        {% endfor %}
+-    </div>
++	<ul class="nav nav-{{ tab_type }} {% if justified %}nav-justified{% endif %}">
++		{% for key, tab in tabs %}
++			<li class="nav-item">
++				{% set tab_classes = [
++                    loop.first ? 'active',
++                    'nav-link',
++                    ]
++                %}
++				<a href="{{ "#tab-#{ id }-#{ key }" }}" class="{{ tab_classes|join(' ') }}" data-toggle="tab">{{ tab }}</a>
++			</li>
++		{% endfor %}
++	</ul>
++	<div class="tab-content">
++		{% for key, row in rows %}
++			{% set row_classes = [
++                'tab-pane',
++                loop.first ? 'active show',
++                'fade',
++                ]
++            %}
++			<div class="{{ row_classes|join(' ') }}" id="tab-{{ id }}-{{ key }}" {{ row.attributes }}>
++
++				{% if row.content is not empty %}
++					{{ row.content }}
++				{% endif %}
++
++				{% if row.content_tabs is not empty %}
++					{% for tc_key, tab_content in row.content_tabs %}
++						{{ tab_content }}
++					{% endfor %}
++				{% endif %}
++
++			</div>
++		{% endfor %}
++	</div>
+ </div>
+diff --git a/views_bootstrap.theme.inc b/views_bootstrap.theme.inc
+index 8ff73bd..b0460ad 100644
+--- a/views_bootstrap.theme.inc
++++ b/views_bootstrap.theme.inc
+@@ -212,21 +212,59 @@ function template_preprocess_views_bootstrap_tab(array &$vars) {
+   $vars['id'] = ViewsBootstrap::getUniqueId($vars['view']);
+   $view = $vars['view'];
+   $tab_field = $view->style_plugin->options['tab_field'];
+   $vars['tab_type'] = $view->style_plugin->options['tab_type'];
+   $vars['justified'] = $view->style_plugin->options['justified'];
++  $vars['tab_group'] = $view->style_plugin->options['tab_group'];
+ 
+   // Get tabs.
+   if ($tab_field) {
++    // Keeps which id is used for group by field value
++    $tab_ids = [];
+     if (isset($view->field[$tab_field])) {
+       foreach (array_keys($vars['rows']) as $key) {
+-        $vars['tabs'][$key] = $view->style_plugin->getFieldValue($key, $tab_field);
++        $tab_field_value = $view->style_plugin->getFieldValue($key, $tab_field);
++        // The rendered field but strip tags so no views markup ruins
++        // the tab specific markup.
++        $tab_field_rendered = strip_tags($view->style_plugin->getField($key, $tab_field));
++
++        // If tabs are grouped get previous key for the value
++        if ($vars['tab_group'] && isset($tab_ids[$tab_field_value])) {
++          $key = $tab_ids[$tab_field_value];
++        }
++        else {
++          $tab_ids[$tab_field_value] = $key;
++        }
++
++        $vars['tabs'][$key] = $tab_field_rendered;
+       }
+     }
+     foreach ($vars['rows'] as $id => $row) {
+       $vars['rows'][$id] = [];
+-      $vars['rows'][$id]['content'] = $row;
+-      $vars['rows'][$id]['attributes'] = new Attribute();
++      // $vars['rows'][$id]['content'] = $row;
++      // $vars['rows'][$id]['attributes'] = new Attribute();
++
++      $tab_field_value = $view->style_plugin->getFieldValue($id, $tab_field);
++
++      // If groups the tabs create new array with all the values for the tab content
++      if ($vars['tab_group'] && isset($tab_ids[$tab_field_value])) {
++        if (!isset($vars['rows'][$id]['content_tabs'])) {
++          $vars['rows'][$id]['content_tabs'] = array();
++        }
++
++        // group by the key of first met value of the field grouped by
++        $id = $tab_ids[$tab_field_value];
++        $vars['rows'][$id]['content_tabs'][] = $row;
++      }
++      else {
++        $vars['rows'][$id]['content'] = $row;
++      }
++
++      if (!isset($vars['rows'][$id]['attributes'])) {
++        $vars['rows'][$id]['attributes'] = new Attribute();
++      }
++
+       if ($row_class = $view->style_plugin->getRowClass($id)) {
+         $vars['rows'][$id]['attributes']->addClass($row_class);
+       }
++
+     }
+   }
+   else {
